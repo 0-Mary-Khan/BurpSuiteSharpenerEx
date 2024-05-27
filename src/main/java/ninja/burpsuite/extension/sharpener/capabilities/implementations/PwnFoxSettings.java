@@ -21,8 +21,8 @@ public class PwnFoxSettings extends CapabilitySettings {
                 new Capability("PwnFox Highlighter",
                         "Useful when PwnFox extension is enabled in Firefox",
                         "pwnFoxSupportCapability",
-                        Arrays.asList(CapabilityGroup.PROXY_REQUEST_HANDLER),
-                        "ninja.burpsuite.extension.sharpener.capabilities.implementations.PwnFoxProxyRequestHandler",
+                        Arrays.asList(CapabilityGroup.PROXY_REQUEST_HANDLER, CapabilityGroup.PROXY_RESPONSE_HANDLER),
+                        "ninja.burpsuite.extension.sharpener.capabilities.implementations.PwnFoxProxyRequestResponseHandler",
                         50000, true));
     }
 
