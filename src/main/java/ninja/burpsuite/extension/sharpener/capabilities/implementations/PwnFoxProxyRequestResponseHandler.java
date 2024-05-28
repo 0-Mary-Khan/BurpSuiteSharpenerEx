@@ -6,15 +6,24 @@
 
 package ninja.burpsuite.extension.sharpener.capabilities.implementations;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 
 import burp.api.montoya.core.HighlightColor;
+import burp.api.montoya.http.message.requests.HttpRequest;
+import burp.api.montoya.http.message.responses.HttpResponse;
 import burp.api.montoya.proxy.http.*;
 import ninja.burpsuite.extension.sharpener.ExtensionSharedParameters;
 import ninja.burpsuite.extension.sharpener.capabilities.objects.CapabilitySettings;
 
 public class PwnFoxProxyRequestResponseHandler implements ProxyRequestHandler, ProxyResponseHandler {
+
+    String PWNFOX_HEADER = "X-Pwnfox-Color";
+
+    String CONTENT_TYPE_HEADER = "Content-Type";
+
     ExtensionSharedParameters sharedParameters;
+
     CapabilitySettings capabilitySettings;
 
     public PwnFoxProxyRequestResponseHandler(ExtensionSharedParameters sharedParameters,
@@ -25,23 +34,80 @@ public class PwnFoxProxyRequestResponseHandler implements ProxyRequestHandler, P
 
     @Override
     public ProxyRequestReceivedAction handleRequestReceived(InterceptedRequest interceptedRequest) {
-        var headerList = interceptedRequest.headers();
-        if (headerList != null) {
-            if (capabilitySettings.isEnabled()) {
-                for (var item : headerList) {
-                    if (item.name().equalsIgnoreCase("x-pwnfox-color")) {
-                        var pwnFoxColor = item.value();
-                        if (!pwnFoxColor.isEmpty()) {
-                            interceptedRequest.annotations()
-                                    .setHighlightColor(HighlightColor.highlightColor(pwnFoxColor));
+
+        var OPTIONS_VERB = "OPTIONS";
+
+        var ACRH = "Access-Control-Request-Headers";
+
+        HttpRequest modifiedRequest = interceptedRequest;
+
+        if (capabilitySettings.isEnabled()) {
+
+            var annotations = interceptedRequest.annotations();
+
+            var pwnFoxHeaderValue = modifiedRequest.headerValue(PWNFOX_HEADER);
+
+            if (null != pwnFoxHeaderValue) {
+
+                modifiedRequest = modifiedRequest.withRemovedHeader(PWNFOX_HEADER);
+
+                var pwnFoxColour = HighlightColor.highlightColor(pwnFoxHeaderValue);
+
+                annotations.setHighlightColor(pwnFoxColour);
+            }
+
+            var requestMethod = modifiedRequest.method();
+
+            if (requestMethod.equals(OPTIONS_VERB)) {
+
+                var corsRequestHeadersString = modifiedRequest.headerValue(ACRH);
+
+                if (null != corsRequestHeadersString) {
+
+                    var corsRequestHeadersArray = corsRequestHeadersString.split(",\\s*");
+
+                    var modifiedCorsRequestHeadersList = new ArrayList<String>();
+
+                    var isPwnFoxPreflight = false;
+
+                    for (var i = 0; i < corsRequestHeadersArray.length; i++) {
+
+                        var corsRequestHeader = corsRequestHeadersArray[i];
+
+                        if (corsRequestHeader.equalsIgnoreCase(PWNFOX_HEADER)) {
+
+                            isPwnFoxPreflight = true;
+
+                        } else {
+
+                            modifiedCorsRequestHeadersList.add(corsRequestHeader);
                         }
-                        return ProxyRequestReceivedAction
-                                .continueWith(interceptedRequest.withRemovedHeader("X-PwnFox-Color"));
+                    }
+
+                    if (isPwnFoxPreflight) {
+
+                        var notes = annotations.notes();
+
+                        notes += "\n" + PWNFOX_HEADER + "\n";
+
+                        if (0 == modifiedCorsRequestHeadersList.size()) {
+
+                            modifiedCorsRequestHeadersList.add(CONTENT_TYPE_HEADER);
+
+                            notes += CONTENT_TYPE_HEADER + "\n";
+                        }
+
+                        annotations.setNotes(notes);
+
+                        var modifiedCorsRequestHeadersString = String.join(", ", modifiedCorsRequestHeadersList);
+
+                        modifiedRequest = modifiedRequest.withUpdatedHeader(ACRH, modifiedCorsRequestHeadersString);
                     }
                 }
             }
         }
-        return ProxyRequestReceivedAction.continueWith(interceptedRequest);
+
+        return ProxyRequestReceivedAction.continueWith(modifiedRequest);
     }
 
     @Override
@@ -52,65 +118,105 @@ public class PwnFoxProxyRequestResponseHandler implements ProxyRequestHandler, P
     @Override
     public ProxyResponseReceivedAction handleResponseReceived(InterceptedResponse interceptedResponse) {
 
-        var OPTIONS_VERB = "OPTIONS";
+        var ORIGIN_HEADER = "Origin";
 
-        var ACRH = "Access-Control-Request-Headers";
+        var ACRM = "Access-Control-Request-Method";
+
+        var LOCATION_HEADER = "Location";
+
+        var SET_COOKIE_HEADER = "Set-Cookie";
+
+        var ACAO = "Access-Control-Allow-Origin";
+
+        var ACAC = "Access-Control-Allow-Credentials";
 
         var ACAH = "Access-Control-Allow-Headers";
 
-        var PWNFOX_HEADER = "X-Pwnfox-Color";
+        var ACAM = "Access-Control-Allow-Methods";
 
-        var PWNFOX_HEADER_LOWER = PWNFOX_HEADER.toLowerCase();
+        HttpResponse modifiedResponse = interceptedResponse;
 
-        var initiatingRequest = interceptedResponse.initiatingRequest();
+        if (capabilitySettings.isEnabled()) {
 
-        var initiatingRequestMethod = initiatingRequest.method();
+            var annotations = interceptedResponse.annotations();
 
-        if (initiatingRequestMethod.equals(OPTIONS_VERB)) {
+            var notes = annotations.notes();
 
-            var corsRequestHeadersString = initiatingRequest.headerValue(ACRH);
+            if (notes.contains(PWNFOX_HEADER)) {
 
-            if (null != corsRequestHeadersString) {
+                var modifiedCorsResponseHeadersString = PWNFOX_HEADER;
 
-                if (capabilitySettings.isEnabled()) {
+                var corsResponseHeadersString = modifiedResponse.headerValue(ACAH);
 
-                    corsRequestHeadersString = corsRequestHeadersString.toLowerCase();
+                modifiedResponse = modifiedResponse.withRemovedHeader(ACAH);
 
-                    var corsRequestHeadersArray = corsRequestHeadersString.split(",\\s*");
+                if (null != corsResponseHeadersString) {
 
-                    var corsRequestHeadersList = Arrays.asList(corsRequestHeadersArray);
+                    modifiedCorsResponseHeadersString += ", " + corsResponseHeadersString;
 
-                    if (corsRequestHeadersList.contains(PWNFOX_HEADER_LOWER)) {
+                }
 
-                        var updatedCorsResponseHeadersString = PWNFOX_HEADER;
+                if (notes.contains(CONTENT_TYPE_HEADER)) {
 
-                        var corsResponseHeadersString = interceptedResponse.headerValue(ACAH);
+                    modifiedResponse = modifiedResponse.withStatusCode((short) 200);
 
-                        if (null != corsResponseHeadersString) {
+                    modifiedResponse = modifiedResponse.withRemovedHeader(LOCATION_HEADER);
 
-                            var corsResponseHeadersArray = corsResponseHeadersString.toLowerCase().split(",\\s*");
+                    modifiedResponse = modifiedResponse.withRemovedHeader(SET_COOKIE_HEADER);
 
-                            var corsResponseHeadersList = Arrays.asList(corsResponseHeadersArray);
+                    modifiedResponse = modifiedResponse.withBody("");
 
-                            if (!corsResponseHeadersList.contains(PWNFOX_HEADER_LOWER)) {
+                    var initiatingRequest = interceptedResponse.initiatingRequest();
 
-                                updatedCorsResponseHeadersString += ", " + corsResponseHeadersString;
+                    var origin = initiatingRequest.headerValue(ORIGIN_HEADER);
 
-                                return ProxyResponseReceivedAction.continueWith(interceptedResponse
-                                        .withUpdatedHeader(ACAH, updatedCorsResponseHeadersString));
+                    if (null != origin) {
+
+                        modifiedResponse = modifiedResponse.withRemovedHeader(ACAO);
+
+                        modifiedResponse = modifiedResponse.withAddedHeader(ACAO, origin);
+
+                        modifiedResponse = modifiedResponse.withRemovedHeader(ACAC);
+
+                        modifiedResponse = modifiedResponse.withAddedHeader(ACAC, "true");
+
+                        var corsRequestMethodString = initiatingRequest.headerValue(ACRM);
+
+                        if (null != corsRequestMethodString) {
+
+                            var modifiedCorsResponseMethodsString = corsRequestMethodString;
+
+                            var corsResponseMethodsString = modifiedResponse.headerValue(ACAM);
+
+                            modifiedResponse = modifiedResponse.withRemovedHeader(ACAM);
+
+                            if (null != corsResponseMethodsString && !corsResponseMethodsString.equals("*")) {
+
+                                var corsResponseMethodsArray = corsResponseMethodsString.split(",\\s*");
+
+                                var corsResponseMethodsList = Arrays.asList(corsResponseMethodsArray);
+
+                                if (!corsResponseMethodsList.contains(corsRequestMethodString)) {
+
+                                    modifiedCorsResponseMethodsString += ", " + corsResponseMethodsString;
+
+                                } else {
+
+                                    modifiedCorsResponseMethodsString = corsResponseMethodsString;
+                                }
                             }
 
-                        } else {
-
-                            return ProxyResponseReceivedAction.continueWith(interceptedResponse
-                                    .withAddedHeader(ACAH, updatedCorsResponseHeadersString));
+                            modifiedResponse = modifiedResponse.withAddedHeader(ACAM,
+                                    modifiedCorsResponseMethodsString);
                         }
                     }
                 }
+
+                modifiedResponse = modifiedResponse.withAddedHeader(ACAH, modifiedCorsResponseHeadersString);
             }
         }
 
-        return ProxyResponseReceivedAction.continueWith(interceptedResponse);
+        return ProxyResponseReceivedAction.continueWith(modifiedResponse);
     }
 
     @Override
